@@ -57,6 +57,11 @@ class YearStats {
   int vendite = 0;
   double ricavi = 0;
   double costoVenduti = 0;
+  /// Spese contate quando le sostieni (sempre alla loro data, anche se collegate a un orologio).
+  double speseCassa = 0;
+  double speseCassaLegate = 0;
+
+  /// Spese contate nel guadagno: le collegate a un orologio solo alla sua vendita.
   double spese = 0;
   double speseGenerali = 0;
   double speseLegate = 0;
@@ -72,7 +77,7 @@ class YearStats {
   YearStats(this.year);
 
   /// Cassa: quanto hai incassato meno quanto hai speso nell'anno.
-  double get nettoCassa => ricavi - costoAcquisti - spese;
+  double get nettoCassa => ricavi - costoAcquisti - speseCassa;
 
   /// Guadagno sui pezzi venduti: ricavi meno acquisto e spese collegate.
   double get guadagno => ricavi - costoVenduti - speseLegate;
@@ -112,6 +117,10 @@ YearStats computeYear(Db db, int? year) {
     }
   }
   for (final e in db.expenses) {
+    if (_inYear(e.date, year)) {
+      s.speseCassa += e.amount;
+      if (isLinkedExpense(e, byId)) s.speseCassaLegate += e.amount;
+    }
     final d = expenseCountDate(e, byId);
     if (d == null) {
       s.speseInSospeso += e.amount;
@@ -173,7 +182,7 @@ List<Tot> salesByMonth(Db db, int year) {
   return out;
 }
 
-/// Dettaglio di un profilo in un anno.
+/// Dettaglio di un profilo in un anno. Le spese sono quelle sostenute (cassa).
 class ProfileStats {
   int vendite = 0;
   double ricavi = 0;
@@ -186,7 +195,6 @@ class ProfileStats {
 
 ProfileStats computeProfile(Db db, String profileId, int? year) {
   final p = ProfileStats();
-  final byId = _byId(db);
   for (final w in db.watches) {
     if (w.isSold && w.sellerProfileId == profileId && _inYear(w.saleDate, year)) {
       p.vendite++;
@@ -199,8 +207,7 @@ ProfileStats computeProfile(Db db, String profileId, int? year) {
     }
   }
   for (final e in db.expenses) {
-    final d = expenseCountDate(e, byId);
-    if (d != null && e.profileId == profileId && _inYear(d, year)) p.spese += e.amount;
+    if (e.profileId == profileId && _inYear(e.date, year)) p.spese += e.amount;
   }
   return p;
 }

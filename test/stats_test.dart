@@ -35,10 +35,11 @@ void main() {
     expect(s.costoAcquisti, 70);
     expect(s.vendite, 0);
     expect(s.spese, 5);
+    expect(s.speseCassa, 9);
     expect(s.giacenzaN, 2);
     expect(s.giacenzaValore, 70);
     expect(s.collezioneN, 0);
-    expect(s.nettoCassa, -75);
+    expect(s.nettoCassa, -79);
   });
 
   test('anno 2026: la collezione resta fuori da acquisti e netto', () {
@@ -49,6 +50,7 @@ void main() {
     expect(s.ricavi, 150);
     expect(s.costoVenduti, 50);
     expect(s.spese, 14);
+    expect(s.speseCassa, 17);
     expect(s.speseGenerali, 10);
     expect(s.speseLegate, 4);
     expect(s.speseInSospeso, 7);
@@ -57,7 +59,7 @@ void main() {
     expect(s.collezioneN, 1);
     expect(s.collezioneCosto, 200);
     expect(s.collezioneValore, 350);
-    expect(s.nettoCassa, 116);
+    expect(s.nettoCassa, 113);
     expect(s.margineNetto, 86);
     expect(s.guadagno, 96);
   });
@@ -68,6 +70,7 @@ void main() {
     expect(s.costoAcquisti, 90);
     expect(s.vendite, 2);
     expect(s.spese, 19);
+    expect(s.speseCassa, 26);
     expect(s.giacenzaN, 1);
     expect(s.collezioneN, 1);
   });
@@ -81,15 +84,15 @@ void main() {
     final d = computeProfile(sample(), 'D', 2026);
     expect(d.vendite, 0);
     expect(d.ricavi, 0);
-    expect(d.spese, 10);
+    expect(d.spese, 17);
     final e = computeProfile(sample(), 'E', 2026);
     expect(e.vendite, 2);
     expect(e.ricavi, 150);
     expect(e.acquisti, 1);
     expect(e.costoAcquisti, 20);
-    expect(e.spese, 4);
+    expect(e.spese, 0);
     expect(e.guadagno, 96);
-    expect(e.nettoCassa, 126);
+    expect(e.nettoCassa, 130);
   });
 
   test('la spesa collegata entra nel guadagno del pezzo quando lo vendi', () {

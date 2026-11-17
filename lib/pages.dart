@@ -436,10 +436,10 @@ class SpesePage extends StatelessWidget {
       children: [
         HeroCard(
           label: 'Spese · ${yearLabel()}',
-          value: eur(s.spese),
+          value: eur(s.speseCassa),
           stats: [
             ('Generali', eur(s.speseGenerali)),
-            ('Collegate a vendite', eur(s.speseLegate)),
+            ('Collegate a orologi', eur(s.speseCassaLegate)),
           ],
         ),
         const SectionLabel('Spese generali'),
@@ -494,6 +494,7 @@ class StatsPage extends StatelessWidget {
     final p = computeProfile(db, profileId, app.year);
     final plats = salesByPlatformFor(db, profileId, app.year).entries.toList()
       ..sort((a, b) => b.value.m.compareTo(a.value.m));
+    final heading = TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: t.ink);
     openSheet(
       context,
       Column(
@@ -502,72 +503,78 @@ class StatsPage extends StatelessWidget {
           Row(
             children: [
               Avatar(profileId, size: 44),
-              const SizedBox(width: 12),
-              Expanded(child: SheetTitle('${db.profileName(profileId)} · ${yearLabel()}')),
-            ],
-          ),
-          Row(
-            children: [
-              Expanded(child: KpiTile(label: 'Vendite', value: '${p.vendite}')),
-              const SizedBox(width: 10),
-              Expanded(child: KpiTile(label: 'Ricavi', value: eur(p.ricavi))),
-              const SizedBox(width: 10),
+              const SizedBox(width: 14),
               Expanded(
-                child: KpiTile(label: 'Guadagno', value: eur(p.guadagno), color: p.guadagno >= 0 ? t.green : t.red),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      db.profileName(profileId),
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.3),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${yearLabel()} · ${p.vendite} ${p.vendite == 1 ? 'vendita' : 'vendite'}',
+                      style: TextStyle(color: t.muted, fontSize: 13.5),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
-          const SizedBox(height: 20),
-          Text(
-            'VENDITE PER PIATTAFORMA',
-            style: TextStyle(color: t.muted, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w700),
-          ),
-          const SizedBox(height: 8),
-          if (plats.isEmpty) Text('Nessuna vendita in questo periodo.', style: TextStyle(color: t.muted)),
-          for (final e in plats)
-            Container(
-              margin: const EdgeInsets.only(bottom: 8),
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: t.field, borderRadius: BorderRadius.circular(14)),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(e.key, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                        const SizedBox(height: 2),
-                        Text(
-                          '${e.value.n} ${e.value.n == 1 ? 'vendita' : 'vendite'}',
-                          style: TextStyle(color: t.muted, fontSize: 12.5),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(eur(e.value.m), style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: kTabular)),
-                      const SizedBox(height: 4),
-                      Pill(_signed(e.value.g, money: true), positive: e.value.g >= 0),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          const Divider(height: 24),
-          _row('Acquisti fatti', '${p.acquisti} · ${eur(p.costoAcquisti)}'),
-          _row('Spese', eur(p.spese)),
-          _row('Netto di cassa', eur(p.nettoCassa), bold: true),
+          const SizedBox(height: 26),
+          Text('Vendite per piattaforma', style: heading),
           const SizedBox(height: 6),
+          if (plats.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              child: Text('Nessuna vendita in questo periodo.', style: TextStyle(color: t.muted)),
+            )
+          else
+            _PlatformTable(rows: plats),
+          const SizedBox(height: 28),
+          Text('Cassa', style: heading),
+          const SizedBox(height: 2),
+          _ledger('Ricavi', eur(p.ricavi)),
+          _ledger('Acquisti · ${p.acquisti} ${p.acquisti == 1 ? 'pezzo' : 'pezzi'}', '\u2212${eur(p.costoAcquisti)}'),
+          _ledger('Spese', '\u2212${eur(p.spese)}'),
+          Divider(height: 1, color: t.border),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Row(
+              children: [
+                const Expanded(child: Text('Netto di cassa', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800))),
+                Text(
+                  eur(p.nettoCassa),
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                    color: p.nettoCassa >= 0 ? t.green : t.red,
+                    fontFeatures: kTabular,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
           Text(
-            'Il guadagno è il ricavo meno il costo di acquisto e le spese collegate al pezzo.',
-            style: TextStyle(fontSize: 12, color: t.muted, height: 1.35),
+            'Guadagno = prezzo di vendita meno acquisto e spese collegate al pezzo.',
+            style: TextStyle(fontSize: 12.5, color: t.muted, height: 1.35),
           ),
         ],
       ),
     );
   }
+
+  static Widget _ledger(String a, String b) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 9),
+        child: Row(
+          children: [
+            Expanded(child: Text(a)),
+            Text(b, style: const TextStyle(fontWeight: FontWeight.w600, fontFeatures: kTabular)),
+          ],
+        ),
+      );
 
   static Widget _row(String a, String b, {bool bold = false}) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 5),
@@ -714,7 +721,7 @@ class StatsPage extends StatelessWidget {
     final y = app.year;
     final s = computeYear(db, y);
     final prev = y == null ? null : computeYear(db, y - 1);
-    final hasPrev = prev != null && (prev.vendite > 0 || prev.acquisti > 0 || prev.spese > 0);
+    final hasPrev = prev != null && (prev.vendite > 0 || prev.acquisti > 0 || prev.speseCassa > 0);
     final years = availableYears(db);
     final months = y == null ? null : salesByMonth(db, y);
 
@@ -745,7 +752,7 @@ class StatsPage extends StatelessWidget {
               KpiTile(label: 'Ricavi', value: eur(s.ricavi)),
               KpiTile(label: 'Netto di cassa', value: eur(s.nettoCassa), color: s.nettoCassa >= 0 ? t.green : t.red),
               KpiTile(label: 'Acquisti', value: eur(s.costoAcquisti)),
-              KpiTile(label: 'Spese', value: eur(s.spese)),
+              KpiTile(label: 'Spese', value: eur(s.speseCassa)),
             ],
           ),
         ),
@@ -798,7 +805,7 @@ class StatsPage extends StatelessWidget {
                     children: [
                       _delta(context, 'Vendite', s.vendite - prev.vendite),
                       _delta(context, 'Ricavi', s.ricavi - prev.ricavi, money: true),
-                      _delta(context, 'Spese', s.spese - prev.spese, money: true, goodWhenUp: false),
+                      _delta(context, 'Spese', s.speseCassa - prev.speseCassa, money: true, goodWhenUp: false),
                       _delta(context, 'Netto di cassa', s.nettoCassa - prev.nettoCassa, money: true),
                     ],
                   ),
@@ -808,6 +815,72 @@ class StatsPage extends StatelessWidget {
           ),
         ),
         const DomSignature(),
+      ],
+    );
+  }
+}
+
+/// Tabella piattaforma / vendite / ricavi / guadagno, con riga del totale.
+class _PlatformTable extends StatelessWidget {
+  final List<MapEntry<String, Tot>> rows;
+  const _PlatformTable({required this.rows});
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tk;
+    final n = rows.fold<int>(0, (s, e) => s + e.value.n);
+    final m = rows.fold<double>(0, (s, e) => s + e.value.m);
+    final g = rows.fold<double>(0, (s, e) => s + e.value.g);
+
+    Widget cell(String text, {TextStyle? style, TextAlign align = TextAlign.right}) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 13),
+          child: Text(
+            text,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: align,
+            style: style,
+          ),
+        );
+
+    TextStyle head = TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: t.muted);
+    TextStyle num(Color? c, {bool bold = false}) => TextStyle(
+          fontSize: 14,
+          fontWeight: bold ? FontWeight.w800 : FontWeight.w600,
+          color: c,
+          fontFeatures: kTabular,
+        );
+    Color gainColor(double v) => v >= 0 ? t.green : t.red;
+
+    TableRow row(String name, int count, double revenue, double gain, {bool bold = false}) => TableRow(
+          children: [
+            cell(name, align: TextAlign.left, style: TextStyle(fontSize: 14, fontWeight: bold ? FontWeight.w800 : FontWeight.w500)),
+            cell('$count', style: num(t.muted, bold: bold)),
+            cell(eur(revenue), style: num(null, bold: bold)),
+            cell(_signed(gain, money: true), style: num(gainColor(gain), bold: bold)),
+          ],
+        );
+
+    return Table(
+      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+      columnWidths: const {
+        0: FlexColumnWidth(),
+        1: FixedColumnWidth(34),
+        2: FixedColumnWidth(98),
+        3: FixedColumnWidth(92),
+      },
+      border: TableBorder(horizontalInside: BorderSide(color: t.border)),
+      children: [
+        TableRow(
+          children: [
+            cell('Piattaforma', align: TextAlign.left, style: head),
+            cell('N.', style: head),
+            cell('Ricavi', style: head),
+            cell('Guadagno', style: head),
+          ],
+        ),
+        for (final e in rows) row(e.key, e.value.n, e.value.m, e.value.g),
+        if (rows.length > 1) row('Totale', n, m, g, bold: true),
       ],
     );
   }
