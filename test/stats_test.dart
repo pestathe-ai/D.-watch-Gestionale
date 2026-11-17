@@ -109,5 +109,6 @@ void main() {
     expect(parseNum('12,5'), 12.5);
     expect(parseNum(''), null);
     expect(fmtDate('2026-11-15'), '15/11/2026');
+    expect(fmtDateShort('2000-03-05'), '5 mar 2000');
   });
 }

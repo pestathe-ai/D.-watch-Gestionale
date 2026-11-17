@@ -415,7 +415,8 @@ class _OrderFormState extends State<OrderForm> {
           child: DropdownButtonFormField<String>(
             value: _status,
             isExpanded: true,
-            decoration: const InputDecoration(labelText: 'Stato', border: OutlineInputBorder()),
+            borderRadius: BorderRadius.circular(16),
+            decoration: const InputDecoration(labelText: 'Stato'),
             items: statuses.map((s) => DropdownMenuItem<String>(value: s, child: Text(s))).toList(),
             onChanged: (v) {
               if (v != null) setState(() => _status = v);
