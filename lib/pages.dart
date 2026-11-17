@@ -18,6 +18,19 @@ import 'widgets.dart';
 
 String yearLabel() => app.year == null ? 'Tutti gli anni' : '${app.year}';
 
+String _expNote(Watch w) {
+  final le = linkedExpenses(app.db, w.id);
+  return le > 0 ? ' · +${eur(le)} spese' : '';
+}
+
+/// Guadagno di un pezzo venduto, in euro e in percentuale sul costo totale.
+String _profitText(Db db, Watch w) {
+  final profit = watchProfit(db, w);
+  final cost = w.purchasePrice + linkedExpenses(db, w.id);
+  final pc = cost > 0 ? ' · ${(profit / cost * 100).toStringAsFixed(0)}%' : '';
+  return '${_signed(profit, money: true)}$pc';
+}
+
 String _signed(num v, {bool money = false}) {
   final s = money ? eur(v.toDouble()) : '${v.toInt()}';
   return v >= 0 ? '+$s' : s;
@@ -42,6 +55,9 @@ class _AcquistiPageState extends State<AcquistiPage> {
         break;
       case 'edit':
         openSheet(context, WatchForm(edit: w));
+        break;
+      case 'exp':
+        openSheet(context, ExpenseForm(presetWatchId: w.id));
         break;
       case 'coll':
         app.mutate(() {
@@ -94,7 +110,7 @@ class _AcquistiPageState extends State<AcquistiPage> {
           ItemCard(
             leading: Avatar(w.buyerProfileId),
             title: w.name,
-            subtitle: '${w.purchasePlatform} · ${fmtDateShort(w.purchaseDate)}',
+            subtitle: '${w.purchasePlatform} · ${fmtDateShort(w.purchaseDate)}${_expNote(w)}',
             trailing: PriceColumn(eur(w.purchasePrice)),
             onTap: () => openSheet(context, SellForm(watch: w)),
             menu: moreMenu(
@@ -102,6 +118,7 @@ class _AcquistiPageState extends State<AcquistiPage> {
               onSelected: (v) => _onMenu(v, w),
               items: const [
                 ('sell', 'Segna venduto'),
+                ('exp', 'Aggiungi spesa'),
                 ('edit', 'Modifica'),
                 ('coll', 'Sposta in collezione'),
                 ('del', 'Elimina'),
@@ -123,6 +140,9 @@ class VenditePage extends StatelessWidget {
     switch (v) {
       case 'edit':
         openSheet(context, SellForm(watch: w));
+        break;
+      case 'exp':
+        openSheet(context, ExpenseForm(presetWatchId: w.id));
         break;
       case 'undo':
         app.mutate(() {
@@ -157,8 +177,9 @@ class VenditePage extends StatelessWidget {
           value: eur(s.ricavi),
           stats: [
             ('Vendite', '${s.vendite}'),
-            ('Guadagno lordo', eur(s.margineLordo)),
-            if (s.costoVenduti > 0) ('Ricarico', '${(s.margineLordo / s.costoVenduti * 100).toStringAsFixed(0)}%'),
+            ('Guadagno', eur(s.guadagno)),
+            if (s.costoVenduti + s.speseLegate > 0)
+              ('Ricarico', '${(s.guadagno / (s.costoVenduti + s.speseLegate) * 100).toStringAsFixed(0)}%'),
           ],
         ),
         const SectionLabel('Vendite'),
@@ -167,13 +188,11 @@ class VenditePage extends StatelessWidget {
           ItemCard(
             leading: Avatar(w.sellerProfileId),
             title: w.name,
-            subtitle: '${w.salePlatform ?? 'Non specificato'} · ${fmtDateShort(w.saleDate)} · costo ${eur(w.purchasePrice)}',
+            subtitle:
+                '${w.salePlatform ?? 'Non specificato'} · ${fmtDateShort(w.saleDate)} · costo ${eur(w.purchasePrice)}${linkedExpenses(db, w.id) > 0 ? ' + ${eur(linkedExpenses(db, w.id))} spese' : ''}',
             trailing: PriceColumn(
               eur(w.salePrice ?? 0),
-              below: Pill(
-                '${_signed(w.margin, money: true)}${w.purchasePrice > 0 ? ' · ${(w.margin / w.purchasePrice * 100).toStringAsFixed(0)}%' : ''}',
-                positive: w.margin >= 0,
-              ),
+              below: Pill(_profitText(db, w), positive: watchProfit(db, w) >= 0),
             ),
             onTap: () => openSheet(context, SellForm(watch: w)),
             menu: moreMenu(
@@ -181,6 +200,7 @@ class VenditePage extends StatelessWidget {
               onSelected: (v) => _onMenu(context, v, w),
               items: const [
                 ('edit', 'Modifica vendita'),
+                ('exp', 'Aggiungi spesa'),
                 ('undo', 'Annulla vendita'),
                 ('del', 'Elimina'),
               ],
@@ -347,27 +367,84 @@ class _YearGroupState extends State<_YearGroup> {
 class SpesePage extends StatelessWidget {
   const SpesePage({super.key});
 
+  /// Elenco delle spese collegate a un orologio (non compaiono tra le spese generali).
+  void _linkedSheet(BuildContext context) {
+    final db = app.db;
+    final t = context.tk;
+    final byId = {for (final w in db.watches) w.id: w};
+    final list = db.expenses.where((e) => isLinkedExpense(e, byId)).toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+    openSheet(
+      context,
+      Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const SheetTitle('Spese collegate a un orologio'),
+          Text(
+            "Non sono spese generali: contano quando vendi l'orologio, nel suo guadagno.",
+            style: TextStyle(color: t.muted, fontSize: 13, height: 1.35),
+          ),
+          const SizedBox(height: 12),
+          for (final e in list)
+            Builder(builder: (ctx) {
+              final w = byId[e.watchId]!;
+              return ListTile(
+                contentPadding: EdgeInsets.zero,
+                isThreeLine: true,
+                title: Text(e.desc),
+                subtitle: Text(
+                  '${w.name}\n${w.isSold ? 'Contata nella vendita del ${fmtDateShort(w.saleDate)}' : 'In attesa della vendita'}',
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  openSheet(context, ExpenseForm(edit: e));
+                },
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(eur(e.amount), style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: kTabular)),
+                    IconButton(
+                      tooltip: 'Elimina',
+                      icon: Icon(Icons.delete_outline_rounded, color: t.muted),
+                      onPressed: () async {
+                        if (await confirmDialog(ctx, 'Eliminare la spesa "${e.desc}"?')) {
+                          app.mutate(() => db.expenses.removeWhere((x) => x.id == e.id));
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        }
+                      },
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final db = app.db;
     final y = app.year;
-    final list = db.expenses.where((e) => y == null || yearOf(e.date) == y).toList()
+    final byId = {for (final w in db.watches) w.id: w};
+    final s = computeYear(db, y);
+    final general = db.expenses.where((e) => !isLinkedExpense(e, byId) && (y == null || yearOf(e.date) == y)).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
-    final total = list.fold<double>(0, (s, e) => s + e.amount);
+    final linked = db.expenses.where((e) => isLinkedExpense(e, byId)).toList();
     return ListView(
       padding: EdgeInsets.zero,
       children: [
         HeroCard(
           label: 'Spese · ${yearLabel()}',
-          value: eur(total),
+          value: eur(s.spese),
           stats: [
-            ('Numero di spese', '${list.length}'),
-            if (list.isNotEmpty) ('Media', eur(total / list.length)),
+            ('Generali', eur(s.speseGenerali)),
+            ('Collegate a vendite', eur(s.speseLegate)),
           ],
         ),
-        const SectionLabel('Elenco'),
-        if (list.isEmpty) const EmptyState(Icons.receipt_long_outlined, 'Nessuna spesa in questo periodo.'),
-        for (final e in list)
+        const SectionLabel('Spese generali'),
+        if (general.isEmpty) const EmptyState(Icons.receipt_long_outlined, 'Nessuna spesa generale in questo periodo.'),
+        for (final e in general)
           ItemCard(
             leading: Avatar(e.profileId),
             title: e.desc,
@@ -388,6 +465,18 @@ class SpesePage extends StatelessWidget {
               items: const [('edit', 'Modifica'), ('del', 'Elimina')],
             ),
           ),
+        if (linked.isNotEmpty) ...[
+          const SectionLabel('Collegate agli orologi'),
+          ItemCard(
+            leading: const IconBadge(Icons.link_rounded),
+            title: '${linked.length} ${linked.length == 1 ? 'spesa collegata' : 'spese collegate'}',
+            subtitle: s.speseInSospeso > 0
+                ? '${eur(s.speseInSospeso)} in attesa della vendita del pezzo'
+                : 'Tutte già contate nelle vendite',
+            trailing: Icon(Icons.chevron_right_rounded, color: context.tk.muted),
+            onTap: () => _linkedSheet(context),
+          ),
+        ],
         const DomSignature(),
       ],
     );
@@ -400,7 +489,11 @@ class StatsPage extends StatelessWidget {
   const StatsPage({super.key});
 
   void _profileDetail(BuildContext context, String profileId) {
-    final p = computeProfile(app.db, profileId, app.year);
+    final db = app.db;
+    final t = context.tk;
+    final p = computeProfile(db, profileId, app.year);
+    final plats = salesByPlatformFor(db, profileId, app.year).entries.toList()
+      ..sort((a, b) => b.value.m.compareTo(a.value.m));
     openSheet(
       context,
       Column(
@@ -410,20 +503,66 @@ class StatsPage extends StatelessWidget {
             children: [
               Avatar(profileId, size: 44),
               const SizedBox(width: 12),
-              Expanded(child: SheetTitle('${app.db.profileName(profileId)} · ${yearLabel()}')),
+              Expanded(child: SheetTitle('${db.profileName(profileId)} · ${yearLabel()}')),
             ],
           ),
-          _row('Vendite fatte', '${p.vendite}'),
-          _row('Ricavi', eur(p.ricavi)),
-          _row('Acquisti fatti', '${p.acquisti}'),
-          _row('Costo acquisti', eur(p.costoAcquisti)),
-          _row('Spese', eur(p.spese)),
-          const Divider(height: 24),
-          _row('Netto di cassa', eur(p.nettoCassa), bold: true),
-          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(child: KpiTile(label: 'Vendite', value: '${p.vendite}')),
+              const SizedBox(width: 10),
+              Expanded(child: KpiTile(label: 'Ricavi', value: eur(p.ricavi))),
+              const SizedBox(width: 10),
+              Expanded(
+                child: KpiTile(label: 'Guadagno', value: eur(p.guadagno), color: p.guadagno >= 0 ? t.green : t.red),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
           Text(
-            'Le vendite contano per il profilo che ha venduto, gli acquisti e il loro costo per quello che ha comprato.',
-            style: TextStyle(fontSize: 12, color: context.tk.muted),
+            'VENDITE PER PIATTAFORMA',
+            style: TextStyle(color: t.muted, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          if (plats.isEmpty) Text('Nessuna vendita in questo periodo.', style: TextStyle(color: t.muted)),
+          for (final e in plats)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(color: t.field, borderRadius: BorderRadius.circular(14)),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(e.key, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${e.value.n} ${e.value.n == 1 ? 'vendita' : 'vendite'}',
+                          style: TextStyle(color: t.muted, fontSize: 12.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text(eur(e.value.m), style: const TextStyle(fontWeight: FontWeight.w700, fontFeatures: kTabular)),
+                      const SizedBox(height: 4),
+                      Pill(_signed(e.value.g, money: true), positive: e.value.g >= 0),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          const Divider(height: 24),
+          _row('Acquisti fatti', '${p.acquisti} · ${eur(p.costoAcquisti)}'),
+          _row('Spese', eur(p.spese)),
+          _row('Netto di cassa', eur(p.nettoCassa), bold: true),
+          const SizedBox(height: 6),
+          Text(
+            'Il guadagno è il ricavo meno il costo di acquisto e le spese collegate al pezzo.',
+            style: TextStyle(fontSize: 12, color: t.muted, height: 1.35),
           ),
         ],
       ),
@@ -610,34 +749,14 @@ class StatsPage extends StatelessWidget {
             ],
           ),
         ),
-        const SectionLabel('Dettaglio'),
-        Panel(
-          child: Column(
-            children: [
-              _row('Vendite', '${s.vendite}'),
-              _row('Pezzi acquistati', '${s.acquisti}'),
-              _row('Guadagno sui venduti, dopo spese', eur(s.margineNetto)),
-              _row('Giacenza a fine periodo (${s.giacenzaN})', eur(s.giacenzaValore)),
-              _row('Collezione (${s.collezioneN})', eur(s.collezioneValore)),
-            ],
+        const SectionLabel('Vendite per profilo'),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          child: Text(
+            'Tocca un profilo per vedere le sue vendite per piattaforma.',
+            style: TextStyle(color: t.muted, fontSize: 12.5),
           ),
         ),
-        if (prev != null && hasPrev) ...[
-          SectionLabel('Rispetto al ${y! - 1}'),
-          Panel(
-            child: Wrap(
-              spacing: 28,
-              runSpacing: 12,
-              children: [
-                _delta(context, 'Vendite', s.vendite - prev.vendite),
-                _delta(context, 'Ricavi', s.ricavi - prev.ricavi, money: true),
-                _delta(context, 'Spese', s.spese - prev.spese, money: true, goodWhenUp: false),
-                _delta(context, 'Netto di cassa', s.nettoCassa - prev.nettoCassa, money: true),
-              ],
-            ),
-          ),
-        ],
-        const SectionLabel('Vendite per profilo'),
         _bars(
           context,
           salesBySeller(db, y),
@@ -651,7 +770,90 @@ class StatsPage extends StatelessWidget {
           SectionLabel('Mese per mese · $y'),
           _monthChart(context, months),
         ],
+        _Collapsible(
+          title: 'Altri dettagli',
+          child: Column(
+            children: [
+              Panel(
+                child: Column(
+                  children: [
+                    _row('Vendite', '${s.vendite}'),
+                    _row('Pezzi acquistati', '${s.acquisti}'),
+                    _row('Guadagno sui venduti', eur(s.guadagno)),
+                    _row('Guadagno dopo tutte le spese', eur(s.margineNetto)),
+                    _row('Spese generali', eur(s.speseGenerali)),
+                    _row('Spese collegate a vendite', eur(s.speseLegate)),
+                    if (s.speseInSospeso > 0) _row('Spese in attesa della vendita', eur(s.speseInSospeso)),
+                    _row('Giacenza a fine periodo (${s.giacenzaN})', eur(s.giacenzaValore)),
+                    _row('Collezione (${s.collezioneN})', eur(s.collezioneValore)),
+                  ],
+                ),
+              ),
+              if (prev != null && hasPrev) ...[
+                SectionLabel('Rispetto al ${y! - 1}'),
+                Panel(
+                  child: Wrap(
+                    spacing: 28,
+                    runSpacing: 12,
+                    children: [
+                      _delta(context, 'Vendite', s.vendite - prev.vendite),
+                      _delta(context, 'Ricavi', s.ricavi - prev.ricavi, money: true),
+                      _delta(context, 'Spese', s.spese - prev.spese, money: true, goodWhenUp: false),
+                      _delta(context, 'Netto di cassa', s.nettoCassa - prev.nettoCassa, money: true),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
         const DomSignature(),
+      ],
+    );
+  }
+}
+
+/// Sezione che si apre e si chiude toccando il titolo.
+class _Collapsible extends StatefulWidget {
+  final String title;
+  final Widget child;
+  const _Collapsible({required this.title, required this.child});
+
+  @override
+  State<_Collapsible> createState() => _CollapsibleState();
+}
+
+class _CollapsibleState extends State<_Collapsible> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tk;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        InkWell(
+          onTap: () => setState(() => _open = !_open),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 18, 16, 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    widget.title.toUpperCase(),
+                    style: TextStyle(color: t.muted, fontSize: 11, letterSpacing: 1.4, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                AnimatedRotation(
+                  turns: _open ? 0.5 : 0,
+                  duration: const Duration(milliseconds: 200),
+                  child: Icon(Icons.expand_more_rounded, color: t.muted),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (_open) widget.child,
       ],
     );
   }

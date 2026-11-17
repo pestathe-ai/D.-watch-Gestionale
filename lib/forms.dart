@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'format.dart';
 import 'models.dart';
+import 'stats.dart';
 import 'store.dart';
+import 'theme.dart';
 import 'widgets.dart';
 
 /// Acquisto in giacenza oppure pezzo della collezione (nuovo o da modificare).
@@ -176,7 +178,10 @@ class _SellFormState extends State<SellForm> {
         SheetTitle(w.isSold ? 'Modifica vendita' : 'Segna come venduto'),
         Padding(
           padding: const EdgeInsets.only(bottom: 14),
-          child: Text('${w.name}\nAcquistato a ${eur(w.purchasePrice)}'),
+          child: Text(
+            '${w.name}\nAcquistato a ${eur(w.purchasePrice)}'
+            '${linkedExpenses(app.db, w.id) > 0 ? ' + ${eur(linkedExpenses(app.db, w.id))} di spese collegate' : ''}',
+          ),
         ),
         textInput(_price, 'Prezzo di vendita (€)', number: true),
         PlatformDropdown(label: 'Venduto su', value: _platform, onChanged: (v) => setState(() => _platform = v)),
@@ -264,7 +269,10 @@ class _QuickSaleFormState extends State<QuickSaleForm> {
 
 class ExpenseForm extends StatefulWidget {
   final Expense? edit;
-  const ExpenseForm({super.key, this.edit});
+
+  /// Orologio a cui collegare la spesa fin dall'inizio (dal menu del pezzo).
+  final String? presetWatchId;
+  const ExpenseForm({super.key, this.edit, this.presetWatchId});
 
   @override
   State<ExpenseForm> createState() => _ExpenseFormState();
@@ -275,6 +283,7 @@ class _ExpenseFormState extends State<ExpenseForm> {
   late final TextEditingController _amount;
   late String _date;
   String? _profile;
+  String? _watchId;
 
   @override
   void initState() {
@@ -283,7 +292,18 @@ class _ExpenseFormState extends State<ExpenseForm> {
     _desc = TextEditingController(text: e?.desc ?? '');
     _amount = TextEditingController(text: e == null ? '' : '${e.amount}');
     _date = e?.date ?? todayIso();
-    _profile = e?.profileId ?? (app.db.profiles.isNotEmpty ? app.db.profiles.first.id : null);
+    _watchId = e?.watchId ?? widget.presetWatchId;
+    _profile = e?.profileId ?? _defaultProfile();
+  }
+
+  /// Per una spesa collegata a un orologio, di norma è il profilo che l'ha comprato.
+  String? _defaultProfile() {
+    if (_watchId != null) {
+      for (final w in app.db.watches) {
+        if (w.id == _watchId && w.buyerProfileId != null) return w.buyerProfileId;
+      }
+    }
+    return app.db.profiles.isNotEmpty ? app.db.profiles.first.id : null;
   }
 
   @override
@@ -291,6 +311,19 @@ class _ExpenseFormState extends State<ExpenseForm> {
     _desc.dispose();
     _amount.dispose();
     super.dispose();
+  }
+
+  Watch? get _linked {
+    if (_watchId == null) return null;
+    for (final w in app.db.watches) {
+      if (w.id == _watchId) return w;
+    }
+    return null;
+  }
+
+  Future<void> _pickWatch() async {
+    final r = await openSheet<String>(context, const WatchPickerSheet());
+    if (r != null) setState(() => _watchId = r.isEmpty ? null : r);
   }
 
   void _save() {
@@ -311,8 +344,16 @@ class _ExpenseFormState extends State<ExpenseForm> {
         e.amount = amount;
         e.date = _date;
         e.profileId = _profile;
+        e.watchId = _watchId;
       } else {
-        app.db.expenses.add(Expense(id: newId(), desc: desc, amount: amount, profileId: _profile, date: _date));
+        app.db.expenses.add(Expense(
+          id: newId(),
+          desc: desc,
+          amount: amount,
+          watchId: _watchId,
+          profileId: _profile,
+          date: _date,
+        ));
       }
     });
     Navigator.pop(context);
@@ -320,16 +361,106 @@ class _ExpenseFormState extends State<ExpenseForm> {
 
   @override
   Widget build(BuildContext context) {
+    final t = context.tk;
+    final w = _linked;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SheetTitle(widget.edit == null ? 'Nuova spesa' : 'Modifica spesa'),
         textInput(_desc, 'Descrizione (cinturini, buste, boost...)'),
         textInput(_amount, 'Importo (€)', number: true),
+        InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: _pickWatch,
+          child: InputDecorator(
+            decoration: InputDecoration(
+              labelText: 'Orologio collegato (facoltativo)',
+              suffixIcon: w == null
+                  ? Icon(Icons.expand_more_rounded, color: t.muted)
+                  : IconButton(
+                      icon: Icon(Icons.close_rounded, color: t.muted),
+                      tooltip: 'Scollega',
+                      onPressed: () => setState(() => _watchId = null),
+                    ),
+            ),
+            child: Text(w?.name ?? 'Nessuno: spesa generale', maxLines: 1, overflow: TextOverflow.ellipsis),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 14),
+          child: Text(
+            w == null
+                ? 'Una spesa generale conta subito, nella data che scegli.'
+                : 'Questa spesa conta solo quando vendi l\'orologio: viene tolta dal suo guadagno e compare nella vendita.',
+            style: TextStyle(fontSize: 12, color: t.muted, height: 1.35),
+          ),
+        ),
         ProfileDropdown(label: 'Profilo', value: _profile, onChanged: (v) => setState(() => _profile = v)),
         DateField(label: 'Data', value: _date, onChanged: (v) => setState(() => _date = v)),
         const SizedBox(height: 4),
         SaveRow(onSave: _save),
+      ],
+    );
+  }
+}
+
+/// Elenco con ricerca per scegliere l'orologio a cui collegare una spesa.
+class WatchPickerSheet extends StatefulWidget {
+  const WatchPickerSheet({super.key});
+
+  @override
+  State<WatchPickerSheet> createState() => _WatchPickerSheetState();
+}
+
+class _WatchPickerSheetState extends State<WatchPickerSheet> {
+  String _q = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final t = context.tk;
+    final q = _q.toLowerCase();
+    final stock = app.db.watches.where((w) => w.isStock && w.name.toLowerCase().contains(q)).toList()
+      ..sort((a, b) => b.purchaseDate.compareTo(a.purchaseDate));
+    final sold = app.db.watches.where((w) => w.isSold && w.name.toLowerCase().contains(q)).toList()
+      ..sort((a, b) => (b.saleDate ?? '').compareTo(a.saleDate ?? ''));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SheetTitle('Scegli l\'orologio'),
+        TextField(
+          onChanged: (v) => setState(() => _q = v),
+          decoration: InputDecoration(
+            prefixIcon: Icon(Icons.search_rounded, color: t.muted),
+            hintText: 'Cerca per nome',
+          ),
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 380,
+          child: ListView(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.link_off_rounded),
+                title: const Text('Nessuno: spesa generale'),
+                onTap: () => Navigator.pop(context, ''),
+              ),
+              if (stock.isNotEmpty) const SectionLabel('In giacenza'),
+              for (final w in stock)
+                ListTile(
+                  title: Text(w.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('${eur(w.purchasePrice)} · ${fmtDateShort(w.purchaseDate)}'),
+                  onTap: () => Navigator.pop(context, w.id),
+                ),
+              if (sold.isNotEmpty) const SectionLabel('Già venduti'),
+              for (final w in sold)
+                ListTile(
+                  title: Text(w.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+                  subtitle: Text('Venduto ${fmtDateShort(w.saleDate)} · ${eur(w.salePrice ?? 0)}'),
+                  onTap: () => Navigator.pop(context, w.id),
+                ),
+            ],
+          ),
+        ),
       ],
     );
   }

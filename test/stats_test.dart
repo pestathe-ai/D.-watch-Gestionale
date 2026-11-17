@@ -21,6 +21,10 @@ Db sample() => Db(
       expenses: [
         Expense(id: 'e1', desc: 'Cinturini', amount: 10, profileId: 'D', date: '2026-02-02'),
         Expense(id: 'e2', desc: 'Buste', amount: 5, profileId: 'D', date: '2025-12-30'),
+        // collegata a un pezzo venduto: conta nell'anno della vendita (2026)
+        Expense(id: 'e3', desc: 'Boost', amount: 4, watchId: 'w3', profileId: 'E', date: '2025-12-31'),
+        // collegata a un pezzo ancora in giacenza: non conta finché non lo vendi
+        Expense(id: 'e4', desc: 'Scatola', amount: 7, watchId: 'w1', profileId: 'D', date: '2026-01-10'),
       ],
     );
 
@@ -44,14 +48,18 @@ void main() {
     expect(s.vendite, 2);
     expect(s.ricavi, 150);
     expect(s.costoVenduti, 50);
-    expect(s.spese, 10);
+    expect(s.spese, 14);
+    expect(s.speseGenerali, 10);
+    expect(s.speseLegate, 4);
+    expect(s.speseInSospeso, 7);
     expect(s.giacenzaN, 1);
     expect(s.giacenzaValore, 40);
     expect(s.collezioneN, 1);
     expect(s.collezioneCosto, 200);
     expect(s.collezioneValore, 350);
-    expect(s.nettoCassa, 120);
-    expect(s.margineNetto, 90);
+    expect(s.nettoCassa, 116);
+    expect(s.margineNetto, 86);
+    expect(s.guadagno, 96);
   });
 
   test('tutti gli anni', () {
@@ -59,7 +67,7 @@ void main() {
     expect(s.acquisti, 3);
     expect(s.costoAcquisti, 90);
     expect(s.vendite, 2);
-    expect(s.spese, 15);
+    expect(s.spese, 19);
     expect(s.giacenzaN, 1);
     expect(s.collezioneN, 1);
   });
@@ -79,7 +87,37 @@ void main() {
     expect(e.ricavi, 150);
     expect(e.acquisti, 1);
     expect(e.costoAcquisti, 20);
-    expect(e.nettoCassa, 130);
+    expect(e.spese, 4);
+    expect(e.guadagno, 96);
+    expect(e.nettoCassa, 126);
+  });
+
+  test('la spesa collegata entra nel guadagno del pezzo quando lo vendi', () {
+    final db = sample();
+    final w3 = db.watches.firstWhere((w) => w.id == 'w3');
+    expect(linkedExpenses(db, 'w3'), 4);
+    expect(watchProfit(db, w3), 26); // 50 - 20 - 4
+    final w1 = db.watches.firstWhere((w) => w.id == 'w1');
+    expect(linkedExpenses(db, 'w1'), 7);
+    // venduto il pezzo, la spesa da 7 comincia a contare
+    w1.status = stSold;
+    w1.salePrice = 100;
+    w1.saleDate = '2026-05-01';
+    expect(watchProfit(db, w1), 53); // 100 - 40 - 7
+    final s = computeYear(db, 2026);
+    expect(s.speseInSospeso, 0);
+    expect(s.speseLegate, 11);
+  });
+
+  test('dettaglio di un profilo per piattaforma', () {
+    final db = sample();
+    final p = salesByPlatformFor(db, 'E', 2026);
+    expect(p.keys.toSet(), {'Vinted', 'eBay'});
+    expect(p['Vinted']!.n, 1);
+    expect(p['Vinted']!.m, 100);
+    expect(p['Vinted']!.g, 70); // 100 - 30
+    expect(p['eBay']!.g, 26);
+    expect(salesByPlatformFor(db, 'D', 2026).isEmpty, true);
   });
 
   test('vendite per mese e per piattaforma', () {
